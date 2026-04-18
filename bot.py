@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""
-Yukla Havola Bot — Telegram bot
-Instagram, YouTube, TikTok, Facebook va boshqa saytlardan media yuklab olish
-Obunasiz, bepul, tez ishlaydi
-"""
-
 import os
 import asyncio
 import logging
 import tempfile
 import re
+import shutil
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -22,340 +17,223 @@ from telegram.ext import (
 )
 import yt_dlp
 
-# ──────────────────────────────────────────────
-# SOZLAMALAR — faqat shu yerni o'zgartiring
-# ──────────────────────────────────────────────
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8622971891:AAGBseU_gKtHL2SVQODQr0cV9984n2bwOYQ")
-MAX_FILE_MB = 50          # Telegram bepul limit (MB)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+MAX_FILE_MB = 50
 DOWNLOAD_DIR = tempfile.mkdtemp()
 
-# ──────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Qo'llab-quvvatlanadigan domenlar
-SUPPORTED_DOMAINS = [
-    "instagram.com", "instagr.am",
-    "youtube.com", "youtu.be",
-    "tiktok.com", "vm.tiktok.com",
-    "facebook.com", "fb.com", "fb.watch",
-    "twitter.com", "x.com", "t.co",
-    "pinterest.com", "pin.it",
-    "reddit.com", "redd.it",
-    "vk.com",
-    "dailymotion.com",
-    "twitch.tv",
-    "ok.ru",
-]
 
 def detect_platform(url: str) -> str:
-    """URL'dan platformani aniqlash"""
-    url_lower = url.lower()
-    if "instagram.com" in url_lower or "instagr.am" in url_lower:
+    u = url.lower()
+    if "instagram.com" in u or "instagr.am" in u:
         return "Instagram"
-    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+    if "youtube.com" in u or "youtu.be" in u:
         return "YouTube"
-    if "tiktok.com" in url_lower:
+    if "tiktok.com" in u:
         return "TikTok"
-    if "facebook.com" in url_lower or "fb.watch" in url_lower:
+    if "facebook.com" in u or "fb.watch" in u:
         return "Facebook"
-    if "twitter.com" in url_lower or "x.com" in url_lower:
+    if "twitter.com" in u or "x.com" in u:
         return "Twitter/X"
-    if "pinterest.com" in url_lower or "pin.it" in url_lower:
+    if "pinterest.com" in u or "pin.it" in u:
         return "Pinterest"
-    if "reddit.com" in url_lower or "redd.it" in url_lower:
+    if "reddit.com" in u or "redd.it" in u:
         return "Reddit"
-    if "vk.com" in url_lower:
-        return "VKontakte"
-    if "ok.ru" in url_lower:
-        return "Odnoklassniki"
-    return "Video/Audio"
+    if "vk.com" in u:
+        return "VK"
+    if "ok.ru" in u:
+        return "OK.ru"
+    return "Video"
 
-def is_valid_url(text: str) -> bool:
-    """URL to'g'riligini tekshirish"""
-    pattern = re.compile(
-        r"https?://[^\s]+"
-    )
-    return bool(pattern.search(text))
 
-def extract_url(text: str) -> str | None:
-    """Xabardан URL ni ajratib olish"""
+def extract_url(text: str):
     match = re.search(r"https?://[^\s]+", text)
     return match.group(0) if match else None
 
-async def download_media(url: str, output_dir: str, audio_only: bool = False) -> list[str]:
-    """yt-dlp orqali media yuklash"""
-    downloaded_files = []
+
+async def download_media(url: str, output_dir: str, audio_only: bool = False):
+    files = []
 
     if audio_only:
         ydl_opts = {
-    "format": "best[ext=mp4]/best[height<=720]/best",
-    "outtmpl": os.path.join(output_dir, "%(title).50s.%(ext)s"),
-    "quiet": True,
-    "no_warnings": True,
-    "extractor_args": {"youtube": {"player_client": ["android"]}},
-    "max_filesize": MAX_FILE_MB * 1024 * 1024,
-    "writethumbnail": False,
-    "writeinfojson": False,
-}],
+            "format": "bestaudio/best",
+            "outtmpl": os.path.join(output_dir, "%(title).40s.%(ext)s"),
             "quiet": True,
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
             "no_warnings": True,
-            "max_filesize": MAX_FILE_MB * 1024 * 1024,
+            "noplaylist": True,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
     else:
         ydl_opts = {
-            "format": "best[ext=mp4]/best[height<=720]/best",
-            "outtmpl": os.path.join(output_dir, "%(title).50s.%(ext)s"),
+            "format": "best[ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]/best",
+            "outtmpl": os.path.join(output_dir, "%(title).40s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
+            "noplaylist": True,
             "max_filesize": MAX_FILE_MB * 1024 * 1024,
-            "writethumbnail": False,
-            "writeinfojson": False,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
 
     loop = asyncio.get_event_loop()
 
-    def _download():
+    def _do():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
-    await loop.run_in_executor(None, _download)
+    await loop.run_in_executor(None, _do)
 
-    # Yuklangan fayllarni topish
     for f in Path(output_dir).iterdir():
-        if f.is_file() and not f.suffix in [".json", ".part"]:
-            downloaded_files.append(str(f))
+        if f.is_file() and f.suffix not in [".part", ".json", ".ytdl"]:
+            files.append(str(f))
 
-    return downloaded_files
+    return files
 
-# ──────────────────────────────────────────────
-# HANDLERS
-# ──────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """/ start komandasi"""
     user = update.effective_user
     text = (
         f"👋 Salom, <b>{user.first_name}</b>!\n\n"
-        "🤖 <b>Yukla Havola Bot</b> — tez va bepul media yuklovchi\n\n"
-        "📥 <b>Qo'llab-quvvatlanadigan platformalar:</b>\n"
-        "  • 📸 Instagram (post, reel, story)\n"
-        "  • ▶️ YouTube (video, shorts)\n"
-        "  • 🎵 TikTok\n"
-        "  • 👥 Facebook\n"
-        "  • 🐦 Twitter / X\n"
-        "  • 📌 Pinterest\n"
-        "  • 💬 Reddit\n"
-        "  • 🌐 VK, OK va ko'plab boshqa saytlar\n\n"
-        "✅ <b>Obunasiz, bepul, cheksiz!</b>\n\n"
-        "👇 Shunchaki havola yuboring:"
-    )
-    keyboard = [
-        [InlineKeyboardButton("ℹ️ Yordam", callback_data="help"),
-         InlineKeyboardButton("📊 Statistika", callback_data="stats")]
-    ]
-    await update.message.reply_html(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """/ help komandasi"""
-    text = (
-        "📖 <b>Yukla Havola Bot — Qo'llanma</b>\n\n"
-        "1️⃣ Yuklamoqchi bo'lgan videoning havolasini nusxalang\n"
-        "2️⃣ Shu havolani bot ga yuboring\n"
-        "3️⃣ Bot avtomatik yuklab, sizga yuboradi\n\n"
-        "🎵 <b>Faqat audio (MP3) yuklash:</b>\n"
-        "  /mp3 [havola] — YouTube/boshqa saytdan audio\n\n"
-        "📌 <b>Misol:</b>\n"
-        "  <code>https://www.instagram.com/reel/...</code>\n"
-        "  <code>https://youtu.be/...</code>\n"
-        "  <code>https://vm.tiktok.com/...</code>\n\n"
-        "⚠️ <b>Eslatma:</b> Fayl hajmi 50MB dan oshmasligi kerak\n\n"
-        "🆘 Muammo bo'lsa: @your_support_username"
+        "🤖 <b>Yukla Havola Bot</b>\n\n"
+        "📥 Qo'llab-quvvatlanadi:\n"
+        "• 📸 Instagram (post, reel, story)\n"
+        "• ▶️ YouTube\n"
+        "• 🎵 TikTok\n"
+        "• 👥 Facebook\n"
+        "• 🐦 Twitter / X\n"
+        "• 📌 Pinterest, Reddit, VK...\n\n"
+        "✅ <b>Bepul, obunasiz!</b>\n\n"
+        "👇 Havola yuboring:"
     )
     await update.message.reply_html(text)
 
+
+async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📖 <b>Qo'llanma</b>\n\n"
+        "• Havola yuboring — bot yuklab beradi\n"
+        "• /mp3 [havola] — faqat audio MP3\n"
+        "• /start — bosh menyu\n\n"
+        "⚠️ Fayl 50MB dan oshmasligi kerak"
+    )
+    await update.message.reply_html(text)
+
+
 async def mp3_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """/ mp3 komandasi — faqat audio yuklash"""
     if not ctx.args:
-        await update.message.reply_text("❗ Havola kiriting: /mp3 https://youtu.be/...")
+        await update.message.reply_text("❗ Misol: /mp3 https://youtu.be/...")
         return
-    url = ctx.args[0]
-    await process_download(update, ctx, url, audio_only=True)
+    await process_download(update, ctx, ctx.args[0], audio_only=True)
+
 
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Oddiy xabarni qayta ishlash"""
-    text = update.message.text.strip()
-    url = extract_url(text)
-
+    url = extract_url(update.message.text.strip())
     if not url:
-        await update.message.reply_text(
-            "🔗 Iltimos, to'g'ri havola yuboring.\n"
-            "Misol: https://www.instagram.com/reel/..."
-        )
+        await update.message.reply_text("🔗 Havola yuboring.\nMisol: https://www.instagram.com/reel/...")
         return
+    await process_download(update, ctx, url)
 
-    await process_download(update, ctx, url, audio_only=False)
 
-async def process_download(
-    update: Update,
-    ctx: ContextTypes.DEFAULT_TYPE,
-    url: str,
-    audio_only: bool = False,
-):
-    """Asosiy yuklab olish jarayoni"""
+async def process_download(update, ctx, url, audio_only=False):
     platform = detect_platform(url)
-    mode = "🎵 Audio (MP3)" if audio_only else "🎬 Video"
+    mode = "🎵 Audio" if audio_only else "🎬 Video"
 
-    # Yuklanmoqda xabari
-    status_msg = await update.message.reply_html(
+    status = await update.message.reply_html(
         f"⏳ <b>Yuklanmoqda...</b>\n"
-        f"📡 Platforma: <b>{platform}</b>\n"
-        f"📦 Format: <b>{mode}</b>\n\n"
+        f"📡 {platform} | {mode}\n"
         f"<i>Biroz kuting...</i>"
     )
 
-    tmp_dir = tempfile.mkdtemp(dir=DOWNLOAD_DIR)
+    tmp = tempfile.mkdtemp(dir=DOWNLOAD_DIR)
 
     try:
-        files = await download_media(url, tmp_dir, audio_only=audio_only)
+        files = await download_media(url, tmp, audio_only)
 
         if not files:
-            await status_msg.edit_text(
-                "❌ Fayl topilmadi yoki yuklab bo'lmadi.\n"
-                "🔄 Havolani tekshirib qayta urinib ko'ring."
-            )
+            await status.edit_text("❌ Fayl topilmadi. Havolani tekshiring.")
             return
 
-        await status_msg.edit_text(
-            f"✅ Yuklandi! Yuborilmoqda... ({len(files)} ta fayl)"
-        )
+        await status.edit_text(f"✅ Yuklandi! Yuborilmoqda...")
 
-        for filepath in files[:4]:  # Max 4 fayl
-            file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-
-            if file_size_mb > MAX_FILE_MB:
+        for filepath in files[:4]:
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            if size_mb > MAX_FILE_MB:
                 await update.message.reply_text(
-                    f"⚠️ Fayl hajmi juda katta ({file_size_mb:.1f} MB).\n"
-                    f"Telegram {MAX_FILE_MB} MB gacha qabul qiladi."
+                    f"⚠️ Fayl {size_mb:.1f} MB — juda katta (limit {MAX_FILE_MB} MB)."
                 )
                 continue
 
             ext = Path(filepath).suffix.lower()
-            caption = f"📥 <b>Yukla Havola Bot</b>\n🌐 {platform}"
+            caption = f"📥 <b>Yukla Havola Bot</b> | {platform}"
 
-            try:
-                with open(filepath, "rb") as f:
-                    if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm"]:
+            with open(filepath, "rb") as f:
+                try:
+                    if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"]:
                         await update.message.reply_video(
-                            video=f,
-                            caption=caption,
-                            parse_mode="HTML",
-                            supports_streaming=True,
+                            video=f, caption=caption,
+                            parse_mode="HTML", supports_streaming=True
                         )
-                    elif ext in [".mp3", ".m4a", ".ogg", ".wav", ".aac"]:
+                    elif ext in [".mp3", ".m4a", ".ogg", ".wav", ".aac", ".opus", ".webm"]:
                         await update.message.reply_audio(
-                            audio=f,
-                            caption=caption,
-                            parse_mode="HTML",
+                            audio=f, caption=caption, parse_mode="HTML"
                         )
                     elif ext in [".jpg", ".jpeg", ".png", ".webp"]:
                         await update.message.reply_photo(
-                            photo=f,
-                            caption=caption,
-                            parse_mode="HTML",
+                            photo=f, caption=caption, parse_mode="HTML"
                         )
                     else:
                         await update.message.reply_document(
-                            document=f,
-                            caption=caption,
-                            parse_mode="HTML",
+                            document=f, caption=caption, parse_mode="HTML"
                         )
-            except Exception as send_err:
-                logger.error(f"Yuborish xatosi: {send_err}")
-                await update.message.reply_text(
-                    "⚠️ Fayl yuborishda xatolik. Qayta urinib ko'ring."
-                )
+                except Exception as e:
+                    logger.error(f"Send error: {e}")
+                    await update.message.reply_text("⚠️ Yuborishda xatolik.")
 
-        await status_msg.delete()
+        try:
+            await status.delete()
+        except:
+            pass
 
     except yt_dlp.utils.DownloadError as e:
-        err_text = str(e)
-        if "login" in err_text.lower() or "private" in err_text.lower():
-            msg = "🔒 Bu kontent xususiy (private) yoki kirish talab qiladi."
-        elif "unavailable" in err_text.lower() or "removed" in err_text.lower():
+        err = str(e).lower()
+        if "private" in err or "login" in err or "sign in" in err:
+            msg = "🔒 Bu kontent xususiy (private)."
+        elif "unavailable" in err or "removed" in err:
             msg = "🚫 Kontent o'chirilgan yoki mavjud emas."
-        elif "unsupported" in err_text.lower():
+        elif "unsupported url" in err:
             msg = "❌ Bu platforma qo'llab-quvvatlanmaydi."
+        elif "confirm you're not a bot" in err or "cookie" in err:
+            msg = "🤖 YouTube bot deb blokladi. Boshqa havola yuboring."
         else:
-            msg = f"❌ Yuklab bo'lmadi.\nXato: {err_text[:200]}"
-
-        await status_msg.edit_text(msg)
+            msg = f"❌ Yuklab bo'lmadi.\n<code>{str(e)[:150]}</code>"
+        await status.edit_text(msg, parse_mode="HTML")
 
     except Exception as e:
-        logger.exception(f"Kutilmagan xato: {e}")
-        await status_msg.edit_text(
-            "❌ Xatolik yuz berdi. Qayta urinib ko'ring yoki boshqa havola yuboring."
-        )
+        logger.exception(e)
+        await status.edit_text("❌ Xatolik yuz berdi. Qayta urinib ko'ring.")
 
     finally:
-        # Vaqtinchalik fayllarni o'chirish
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
-async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Inline button callback"""
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "help":
-        text = (
-            "📖 <b>Qo'llanma</b>\n\n"
-            "• Havola yuboring — bot yuklab beradi\n"
-            "• /mp3 [havola] — faqat audio\n"
-            "• /start — bosh menyu\n"
-            "• /help — bu yordam"
-        )
-        await query.edit_message_text(text, parse_mode="HTML")
-    elif query.data == "stats":
-        await query.edit_message_text(
-            "📊 <b>Bot statistikasi</b>\n\n"
-            "✅ Bot ishlayapti!\n"
-            "🌐 15+ platforma qo'llab-quvvatlanadi\n"
-            "💯 Obunasiz, bepul",
-            parse_mode="HTML"
-        )
-
-# ──────────────────────────────────────────────
-# MAIN
-# ──────────────────────────────────────────────
 
 def main():
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ BOT_TOKEN o'rnatilmagan!")
-        print("   export BOT_TOKEN='your_token' qiling")
+    if not BOT_TOKEN:
+        print("❌ BOT_TOKEN topilmadi!")
         return
 
     app = Application.builder().token(BOT_TOKEN).build()
-
-    # Handlerlar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("mp3", mp3_cmd))
-    app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🚀 Yukla Havola Bot ishga tushdi!")
-    print("   Telegram: @YuklaHavolaBot")
-    print("   To'xtatish: Ctrl+C")
-
     app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
