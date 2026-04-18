@@ -25,7 +25,7 @@ import yt_dlp
 # ──────────────────────────────────────────────
 # SOZLAMALAR — faqat shu yerni o'zgartiring
 # ──────────────────────────────────────────────
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8622971891:AAGBseU_gKtHL2SVQODQr0cV9984n2bwOYQ")
 MAX_FILE_MB = 50          # Telegram bepul limit (MB)
 DOWNLOAD_DIR = tempfile.mkdtemp()
 
@@ -105,12 +105,11 @@ async def download_media(url: str, output_dir: str, audio_only: bool = False) ->
         }
     else:
         ydl_opts = {
-            "format": f"bestvideo[filesize<{MAX_FILE_MB}M][ext=mp4]+bestaudio[ext=m4a]/best[filesize<{MAX_FILE_MB}M][ext=mp4]/best[filesize<{MAX_FILE_MB}M]/best",
+            "format": "best[ext=mp4]/best[height<=720]/best",
             "outtmpl": os.path.join(output_dir, "%(title).50s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
             "max_filesize": MAX_FILE_MB * 1024 * 1024,
-            "merge_output_format": "mp4",
             "writethumbnail": False,
             "writeinfojson": False,
         }
