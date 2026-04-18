@@ -92,14 +92,17 @@ async def download_media(url: str, output_dir: str, audio_only: bool = False) ->
 
     if audio_only:
         ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": os.path.join(output_dir, "%(title).50s.%(ext)s"),
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
+    "format": "best[ext=mp4]/best[height<=720]/best",
+    "outtmpl": os.path.join(output_dir, "%(title).50s.%(ext)s"),
+    "quiet": True,
+    "no_warnings": True,
+    "extractor_args": {"youtube": {"player_client": ["android"]}},
+    "max_filesize": MAX_FILE_MB * 1024 * 1024,
+    "writethumbnail": False,
+    "writeinfojson": False,
+}],
             "quiet": True,
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
             "no_warnings": True,
             "max_filesize": MAX_FILE_MB * 1024 * 1024,
         }
